@@ -9,14 +9,14 @@
   /* Arena + summary fonts: Address Sans Pro (Sudtipos) ExtraBold and Light if installed on this PC, otherwise the
      Google fonts after them in each font-family list. local() needs the PostScript name (AddressSansPro-ExtraBold);
      the full name doesn't match these files. Swap the names here to try other installed weights. */
-  @font-face { font-family: 'Overlay Bold'; font-weight: 100 900; src: local('AddressSansPro-ExtraBold'); }
-  @font-face { font-family: 'Overlay Bold'; font-weight: 100 900; font-style: italic; src: local('AddressSansPro-ExtraBoldIt'); }
+  @font-face { font-family: 'Overlay Bold'; font-weight: 100 900; src: url('fonts/BarlowSemiCondensed-ExtraBold.ttf'); }
+  @font-face { font-family: 'Overlay Bold'; font-weight: 100 900; font-style: italic; src: url('fonts/BarlowSemiCondensed-ExtraBoldItalic.ttf'); }
+  @font-face { font-family: 'Overlay Thin'; font-weight: 100 900; src: url('fonts/BarlowSemiCondensed-Light.ttf'); }
+  @font-face { font-family: 'Sky Thin'; font-weight: 300; src: url('fonts/Montserrat-Variable.ttf'); }
+  @font-face { font-family: 'Sky Light'; font-weight: 400; src: url('fonts/Montserrat-Variable.ttf'); }
+  @font-face { font-family: 'Sky Bold'; font-weight: 700; src: url('fonts/Montserrat-Variable.ttf'); }
   /* Sky look: Savior Sans Expanded Light for most text, Expanded (Regular) for the Match Stats numbers and Expanded Bold
      for names and scores (Sudtipos) if installed, otherwise the arena fonts */
-  @font-face { font-family: 'Sky Light'; font-weight: 100 900; src: local('SaviorSans-Expanded'), local('Savior Sans Expanded'); }
-  @font-face { font-family: 'Sky Thin'; font-weight: 100 900; src: local('SaviorSans-ExpandedLight'), local('Savior Sans Expanded Light'); }
-  @font-face { font-family: 'Sky Bold'; font-weight: 100 900; src: local('SaviorSans-ExpandedBold'), local('Savior Sans Expanded Bold'); }
-  @font-face { font-family: 'Overlay Thin'; font-weight: 100 900; src: local('AddressSansPro-Light'); }
   :root {
     --accent: #e5484d;
     --panel: rgba(14, 15, 19, 0.92);
