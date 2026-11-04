@@ -23,10 +23,8 @@
   button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
   #copied { color: var(--muted); font-size: 13px; }
   .stage { margin-top: 22px; display: grid; gap: 18px; }
-  .board { border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
-           background: radial-gradient(120% 140% at 50% 0%, #3b4a3c 0%, #263026 45%, #141a15 100%); }
-  .board h2 { margin: 0; padding: 10px 14px 0; font-size: 13px; font-weight: 700; color: #c9d2c9; letter-spacing: .04em; text-transform: uppercase; }
-  .board iframe { display: block; width: 100%; aspect-ratio: 1000 / 390; border: 0; }
+  .board h2 { margin: 0; padding: 0 2px; font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+  .board iframe { display: block; width: 100%; aspect-ratio: 1000 / 390; border: 0; background: transparent; color-scheme: normal; }
   .hide { display: none; }
   footer { margin-top: 26px; color: var(--muted); font-size: 12.5px; }
 </style>
@@ -88,7 +86,7 @@
       caption: $('caption').value.trim() });
     // flags only show when both players have one
     if ($('f1').value && $('f2').value) p.set('flags', $('f1').value + ',' + $('f2').value);
-    return 'overlay/overlay.html?demo&perfect&once&' + p.toString();
+    return 'overlay/overlay.html?demo&perfect&once&clear&' + p.toString();
   }
   function play() {
     const look = $('look').value;

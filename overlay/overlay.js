@@ -29,7 +29,8 @@
     addEventListener('resize', fitCanvas);
   }
   document.documentElement.style.setProperty('--accent', cfg.accent);
-  if (qs.has('preview') || qs.has('demo')) document.body.classList.add('preview');
+  // the green preview background behind a demo, unless &clear asks for a transparent page (e.g. inside another page)
+  if ((qs.has('preview') || qs.has('demo')) && !qs.has('clear')) document.body.classList.add('preview');
   const arena = $('arena');
   const summary = $('summary');
 
