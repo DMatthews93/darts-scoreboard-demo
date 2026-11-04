@@ -1,0 +1,473 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Scolia Overlay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,500;0,700;0,800;1,800&family=Montserrat:wght@700;800&family=Roboto+Condensed:wght@300&display=swap" rel="stylesheet">
+<style>
+  /* Arena + summary fonts: Address Sans Pro (Sudtipos) ExtraBold and Light if installed on this PC, otherwise the
+     Google fonts after them in each font-family list. local() needs the PostScript name (AddressSansPro-ExtraBold);
+     the full name doesn't match these files. Swap the names here to try other installed weights. */
+  @font-face { font-family: 'Overlay Bold'; font-weight: 100 900; src: local('AddressSansPro-ExtraBold'); }
+  @font-face { font-family: 'Overlay Bold'; font-weight: 100 900; font-style: italic; src: local('AddressSansPro-ExtraBoldIt'); }
+  /* Sky look: Savior Sans Expanded Light for most text, Expanded (Regular) for the Match Stats numbers and Expanded Bold
+     for names and scores (Sudtipos) if installed, otherwise the arena fonts */
+  @font-face { font-family: 'Sky Light'; font-weight: 100 900; src: local('SaviorSans-Expanded'), local('Savior Sans Expanded'); }
+  @font-face { font-family: 'Sky Thin'; font-weight: 100 900; src: local('SaviorSans-ExpandedLight'), local('Savior Sans Expanded Light'); }
+  @font-face { font-family: 'Sky Bold'; font-weight: 100 900; src: local('SaviorSans-ExpandedBold'), local('Savior Sans Expanded Bold'); }
+  @font-face { font-family: 'Overlay Thin'; font-weight: 100 900; src: local('AddressSansPro-Light'); }
+  :root {
+    --accent: #e5484d;
+    --panel: rgba(14, 15, 19, 0.92);
+    --row: rgba(255, 255, 255, 0.04);
+    --text: #f4f5f7;
+    --muted: #9aa0aa;
+    --gold: #f5c542;
+  }
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: transparent; }
+  body { font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; color: var(--text); }
+  /* compact canvas: just big enough for the arena board (720 + checkout chips each side, flags above) and the
+     15-row match summary, so the OBS Browser source box hugs the scoreboard and is easy to move. It is laid out
+     at 1000x720 and scaled to whatever size the Browser source is set to (overlay.js), so it stays sharp. */
+  html.compact { width: 100%; height: 100%; }
+  /* margin 0 !important: OBS adds 'body { margin: 0px auto }' to every Browser source, which would centre the
+     body before it's scaled and push a resized source's content off to the right */
+  html.compact body { width: 1000px; height: 720px; transform-origin: 0 0; margin: 0 !important; }
+  html.compact #arena, html.compact #summary { bottom: 20px; }
+  /* separate sources: ?view=scoreboard shows only the scoreboard (1000x344), ?view=summary only the post-game
+     stats (760x720, centred) */
+  html.view-summary #arena, html.view-summary #sky, html.view-scoreboard #summary { display: none !important; }
+  /* scoreboard-only canvas: pinned from the top, with the flag row's space kept even without flags, so the dials
+     always sit in the same place (flags 59 + tabs 74 + dial bulges to 204 = 337px, plus shadow, in 390) */
+  html.compact.view-scoreboard #arena { top: 12px; bottom: auto; }
+  html.view-scoreboard .a-flags.off { display: flex; visibility: hidden; }
+  /* summary-only canvas: the stats sit in the middle of the box whatever their row count (single leg = 11 rows,
+     sets = 15); +20px balances the MATCH SUMMARY title that hangs above the box */
+  html.view-summary #summary { top: 50%; bottom: auto; transform: translate(-50%, calc(-50% + 20px)); }
+  html.view-summary #summary.hidden { transform: translate(-50%, calc(-50% + 44px)); }
+  body.preview { background: #3a4a3a linear-gradient(135deg, #2b3a2e, #4b5a45); }
+
+  #board { position: absolute; min-width: 560px; transition: opacity .4s, transform .4s; }
+  #board.hidden { opacity: 0; transform: translateY(20px); }
+  .bottom-left { left: 48px; bottom: 48px; } .bottom-right { right: 48px; bottom: 48px; }
+  .top-left { left: 48px; top: 48px; } .top-right { right: 48px; top: 48px; }
+
+  .head { display: flex; background: var(--accent); font-weight: 700; font-size: 20px; letter-spacing: .08em;
+          text-transform: uppercase; padding: 4px 16px; border-radius: 8px 8px 0 0; }
+  .head .cols { margin-left: auto; display: flex; }
+  .head .cols span, .player .num { width: 56px; text-align: center; }
+  .head .cols .remhead { width: 130px; }
+  .table { background: var(--panel); border-radius: 0 0 8px 8px; overflow: hidden; }
+
+  .player { display: flex; align-items: center; height: 72px; position: relative; padding-left: 16px; }
+  .player + .player { border-top: 1px solid rgba(255,255,255,.06); }
+  .player .bar { position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: transparent; transition: background .2s; }
+  .player.current .bar { background: var(--accent); }
+  .player.current { background: var(--row); }
+  .name { font-size: 34px; font-weight: 700; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 12px; }
+  .meta { font-size: 18px; color: var(--muted); font-weight: 500; margin-left: 8px; }
+  .num { font-size: 34px; font-weight: 700; color: var(--muted); }
+  .remaining { width: 130px; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 54px;
+               font-weight: 800; background: rgba(0,0,0,.35); font-variant-numeric: tabular-nums; }
+  .player.current .remaining { background: #fff; color: #0e0f13; }
+  .player.busted .remaining { background: #6b1d20; color: #fff; }
+
+  .foot { display: flex; gap: 8px; margin-top: 8px; min-height: 44px; }
+  .chip { background: var(--panel); border-radius: 6px; padding: 4px 14px; font-size: 26px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+  .chip small { font-size: 16px; color: var(--muted); letter-spacing: .1em; text-transform: uppercase; }
+  .dart { min-width: 54px; text-align: center; }
+  .dart.empty { color: #444; }
+  .checkout { color: var(--gold); }
+  .hide { display: none !important; }
+
+  .arrow { display: none; }
+
+  /* ---------- "broadcast" theme: TV tournament-style bar ---------- */
+  .theme-broadcast { --navy: #0a1a3f; --navy2: #132b63; --band: #06112b; --score: #ffd400; }
+  .theme-broadcast #board { min-width: 620px; filter: drop-shadow(0 6px 18px rgba(0,0,0,.55)); }
+  .theme-broadcast .head { background: linear-gradient(90deg, var(--band), var(--navy2)); border-radius: 0; font-size: 17px;
+                           padding: 3px 0 3px 22px; border-top: 3px solid var(--accent); }
+  .theme-broadcast .head .cols span { width: 52px; }
+  .theme-broadcast .head .cols .remhead { width: 118px; }
+  .theme-broadcast .table { border-radius: 0; background: none; }
+  .theme-broadcast .player { height: 58px; padding-left: 22px; background: linear-gradient(90deg, var(--navy), var(--navy2)); }
+  .theme-broadcast .player + .player { border-top: 2px solid var(--band); }
+  .theme-broadcast .player .bar { display: none; }
+  .theme-broadcast .name { font-size: 32px; text-transform: uppercase; letter-spacing: .03em; }
+  .theme-broadcast .arrow { display: block; position: absolute; left: 4px; top: 50%; transform: translateY(-50%); width: 0; height: 0;
+                            border-left: 0 solid var(--accent); border-top: 11px solid transparent; border-bottom: 11px solid transparent;
+                            transition: border-left-width .15s; }
+  .theme-broadcast .player.current .arrow { border-left-width: 13px; }
+  .theme-broadcast .num { width: 52px; height: 100%; display: flex; align-items: center; justify-content: center;
+                          background: var(--band); color: #fff; font-size: 32px; border-left: 1px solid rgba(255,255,255,.08); }
+  .theme-broadcast .remaining { width: 118px; font-size: 46px; background: #fff; color: var(--band); }
+  .theme-broadcast .player.current .remaining { background: var(--score); color: var(--band); }
+  .theme-broadcast .foot { margin-top: 0; gap: 0; }
+  .theme-broadcast .chip { border-radius: 0; background: var(--band); font-size: 24px; border-top: 2px solid rgba(255,255,255,.06); }
+  .theme-broadcast .chip.checkout { background: var(--accent); color: #fff; }
+  .theme-broadcast .chip.checkout small { color: rgba(255,255,255,.8); }
+
+  /* ---------- "arena" theme (the PDC look): name tabs + twin score dials ----------
+     Laid out 680 x 340 like the TV board, in three layers with their own subtle vertical gradients: the name band and
+     the caption bar at the back, the main panel (both dial rims and the middle) in front. The panel's top and bottom
+     edges curve in between the dials, so the darker band and bar show there and the curves separate the parts. The
+     gradient colours come from Settings (Other player's name tab, Panel) and are set by overlay.js (OBS doesn't
+     repaint an SVG gradient when only CSS variables change). */
+  #arena { position: absolute; left: 50%; bottom: 40px; transform: translateX(-50%); width: 680px; display: none;
+           transition: opacity .4s; --a-accent: #1f6fe5; --a-panel: #1c1f26; --a-tab: #2a2e37; --a-chip: #1c1f26; --a-nine: #f2c94c; }
+  .theme-arena #arena { display: block; }
+  .theme-arena #board { display: none; }
+  #arena.hidden { opacity: 0; }
+  /* the thrower's name tab, score rings and checkout chips all use the highlight colours */
+  #arena, #summary { --a-grad: linear-gradient(90deg, var(--a-accent), var(--a-accent2, var(--a-accent))); }
+  /* country flags (from the players' Scolia profiles; none for CPU or guest players), each in a box joined to the top
+     of the name band over its player's tab */
+  .a-flags { display: flex; padding: 0 52px; margin-bottom: -16px; position: relative; z-index: 1; }
+  .a-flags.off { display: none; }
+  .a-flag { flex: 1; display: flex; justify-content: center; }
+  .a-flag img { width: 66px; height: 44px; object-fit: cover; display: block; padding: 8px 9px 7px;
+                background: var(--a-band-top, #393d45); border-radius: 10px 10px 0 0; }
+  .a-board { position: relative; height: 340px; filter: drop-shadow(0 10px 24px rgba(0,0,0,.5)); }
+  .a-back, .a-front { position: absolute; inset: 0; width: 680px; height: 340px; overflow: visible; }
+  #arena:has(.a-caption.off) .a-bar, #arena:has(#a-caption:empty) .a-bar { display: none; }
+  /* name tabs: the band's full height, behind the main panel, so the thrower's colour (left to right, like the rings)
+     runs down to the panel's curved edge; the other player's tab is the band itself. Long names shrink to fit (overlay.js fitName) */
+  #arena .a-tabs { position: absolute; left: 52px; top: 16px; width: 576px; height: 120px; display: flex; border-radius: 20px; overflow: hidden; }
+  #arena .a-tab { flex: 1; width: auto; height: 100%; background: transparent; border-radius: 0; padding: 0 16px 48px; --name-size: 44px;
+                  color: var(--a-text-name, #fff); }
+  #arena .a-tab.current { background: linear-gradient(90deg, var(--a-accent), var(--a-accent2, var(--a-accent))); }
+  /* nine-darter "9" tile: part of the name band (drawn with it in .a-back, measured from the TV board: about 57 x 58,
+     sticking out 57px); it slides out from behind the band about 0.4 s after the 180, taking about 0.1 s, and the "9"
+     slides with it, clipped at the band edge */
+  .a-back .a-tile { transition: transform .12s cubic-bezier(.3,.7,.4,1); }
+  .a-back .a-tile.left { transform: translateX(57px); } .a-back .a-tile.right { transform: translateX(-57px); }
+  .a-back .a-tile.on { transform: none; transition-delay: .4s; }
+  .a-nine-clip { position: absolute; top: 31px; width: 57px; height: 58px; overflow: hidden; }
+  .a-nine-clip.left { left: -5px; } .a-nine-clip.right { right: -5px; }
+  .a-nine { position: absolute; top: 0; width: 57px; height: 58px; display: flex; align-items: center; justify-content: center;
+            color: var(--a-nine); font: 800 42px 'Overlay Bold', 'Montserrat', sans-serif; transition: transform .12s cubic-bezier(.3,.7,.4,1); }
+  .a-nine.left { left: 0; transform: translateX(57px); } .a-nine.right { right: 0; transform: translateX(-57px); }
+  .a-nine.on { transform: none; transition-delay: .4s; }
+  /* dials, measured from the TV board, from the centre out: face (lighter at the top), a 3px dark gap, the ring (its
+     colours run left to right across the dial, like the thrower's tab), the same 3px dark gap, then a slightly lighter
+     rim out to the board's edge. Ring edges are sharp; the TV ones only look soft from video compression. The lit arc starts at 3 o'clock
+     and runs clockwise for the share of the start score left, so it empties anticlockwise back to 3 o'clock */
+  .a-dial { position: absolute; top: 84px; width: 212px; height: 212px; }
+  .a-dial.left { left: 16px; } .a-dial.right { left: 452px; }
+  .a-dial > svg:not(.a-dart) { position: absolute; inset: 0; overflow: visible; }
+  .a-dial .bevel { fill: color-mix(in srgb, var(--a-panel-bottom, #1a1c27) 90%, #fff); }
+  .a-dial .gap { fill: color-mix(in srgb, var(--a-panel-bottom, #1a1c27) 85%, #0a0618); }
+  .a-dial .track { fill: none; stroke: var(--a-track, #1f2534); stroke-width: 11.5; }
+  .a-dial .arc { fill: none; stroke-width: 11.5; stroke-linecap: butt; transition: stroke-dashoffset .6s ease; }
+  /* while a nine-darter is on: a soft glow inside the ring, steady after the first visit; on the last visit (six
+     perfect darts thrown) it pulses, once every 0.8 s and about 60% brighter at its peak, as on the TV board */
+  .a-dial::after { content: ''; position: absolute; inset: 28px; border-radius: 50%; pointer-events: none; opacity: 0; transition: opacity .6s;
+                   box-shadow: inset 0 0 var(--a-glow-size, 20px) var(--a-glow-spread, 7px) color-mix(in srgb, var(--a-accent2, var(--a-accent)) var(--a-glow-mix, 50%), transparent); }
+  .a-dial.nine::after { opacity: 1; }
+  .a-dial.nine.final::after { animation: a-glow-pulse .8s ease-in-out infinite; }
+  @keyframes a-glow-pulse { 0%, 100% { opacity: .45; } 45% { opacity: 1; } }
+  /* scores and the sets / legs numbers lean 8 degrees, measured from the TV board (the font's own italic leans
+     about 15, nearly twice as much), so they're the upright ExtraBold slanted */
+  .a-score { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; transform: skewX(-8deg);
+             font: 800 51px 'Overlay Bold', 'Barlow Condensed', sans-serif; color: var(--a-text-number, #fff); font-variant-numeric: tabular-nums; }
+  /* who threw first this leg: a small grey dart below their score (the drawing's middle is 15.5px in at this size) */
+  .a-dart { position: absolute; left: 50%; top: 138px; width: 30px; height: 30px; margin-left: -15.5px; color: #c9ccd3;
+            opacity: 0; transition: opacity .3s; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
+  .a-dial.starter .a-dart { opacity: 1; }
+  /* middle: format line just above the sets / legs counts, all centred on the dials (sizes and letter spacing measured
+     against the TV board) */
+  .a-mid { position: absolute; left: 210px; width: 260px; top: 100px; height: 180px; display: flex; flex-direction: column;
+           justify-content: center; align-items: center; line-height: 1; }
+  /* our font's letters are narrower than the TV one's, so the spacing matches TV's gaps between letters (about 5px)
+     rather than its overall width */
+  .a-format { font: 300 24px 'Overlay Thin', 'Roboto Condensed', sans-serif; letter-spacing: .1em; color: var(--a-text-label, #c9ccd3); margin-bottom: 4px; white-space: nowrap; }
+  .a-row { display: grid; grid-template-columns: 50px 96px 50px; align-items: center; justify-items: center; height: 54px; }
+  .a-row b { display: block; transform: skewX(-8deg); font: 800 48px 'Overlay Bold', 'Barlow Condensed', sans-serif; color: var(--a-text-number, #fff); font-variant-numeric: tabular-nums; }
+  .a-row span { font: 300 27px 'Overlay Thin', 'Roboto Condensed', sans-serif; letter-spacing: .12em; padding-left: .12em; color: var(--a-text-label, #c9ccd3); }
+  /* checkout route chips beside the dials */
+  .a-route { position: absolute; top: 112px; height: 162px; display: flex; flex-direction: column; justify-content: flex-start; gap: 8px; }
+  .a-route.left { left: -128px; } .a-route.right { right: -128px; }
+  /* the text leans 8 degrees in the same ExtraBold as the scores and counts; the chip's shape (::before) leans 12 in
+     all, so it adds 4 to the chip's own 8 */
+  .a-route div { position: relative; isolation: isolate; width: 118px; height: 46px; display: flex; align-items: center; justify-content: center;
+                 font-family: 'Overlay Bold', 'Barlow Condensed', sans-serif; font-size: 28px; font-weight: 800; color: #fff; transform: skewX(-8deg); }
+  .a-route div::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: 10px; transform: skewX(-4deg);
+                         background: linear-gradient(180deg, color-mix(in srgb, var(--a-chip) 80%, #fff 8%), var(--a-chip));
+                         box-shadow: 0 4px 14px rgba(0,0,0,.5); }
+  .a-route div.hot::before { background: var(--a-grad); }
+  .a-route div.empty { display: none; }
+  /* caption on the bar under the dials, centred in the part of the bar that shows below the main panel (its bottom
+     edge curves down to 270-273px, the bar ends at 336px); long names shrink to fit (overlay.js fitCaption) */
+  .a-caption { position: absolute; left: 100px; right: 100px; top: 286px; height: 38px; display: flex; align-items: center; justify-content: center; }
+  .a-caption span { display: block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+                    font: 300 25px 'Overlay Thin', 'Roboto Condensed', sans-serif; letter-spacing: .06em; color: var(--a-text-caption, #e8e9ec); text-transform: uppercase; }
+  .a-caption span:empty, .a-caption.off { display: none; }
+
+  /* name tabs as used by the post-game summary (the scoreboard's own tabs are styled under #arena above) */
+  .a-tabs { display: flex; justify-content: center; }
+  .a-tab { position: relative; width: 250px; height: 74px; display: flex; align-items: center; justify-content: center; background: var(--a-tab);
+           font-family: 'Overlay Bold', 'Montserrat', sans-serif; --name-size: 44px; font-size: var(--name-size); font-weight: 800; letter-spacing: .01em; text-transform: uppercase; color: #fff;
+           white-space: nowrap; overflow: hidden; padding: 0 16px; box-sizing: border-box; transition: background .25s; }
+  .a-tab span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .a-tab:first-child { border-radius: 14px 0 0 0; }
+  .a-tab:last-child { border-radius: 0 14px 0 0; }
+  .a-tab.current { background: var(--a-grad); }
+  #summary .a-tab { background: linear-gradient(180deg, var(--a-band-top, #393d45), var(--a-band-bottom, #1e202e)); color: var(--a-text-name, #fff); }
+  #summary .a-tab.current { background: var(--a-grad); }
+
+  /* ---------- "Sky" look (popup: Scoreboard style = Sky): stacked player rows, laid out 1000px wide ----------
+     header (format + column labels), two rows (name and flag on a light strip, then dark sets / legs cells and the
+     remaining score), a triangle by whoever threw first this leg, a footer with the caption, and each row's checkout
+     route to its left. Colours come from --k-* (popup: Sky colours). Shown instead of the arena board; the match
+     summary is shared. */
+  #sky { position: absolute; left: 0; bottom: 20px; width: 1000px; display: none; transition: opacity .4s;
+         font-family: 'Sky Thin', 'Sky Light', 'Overlay Thin', 'Roboto Condensed', sans-serif; font-weight: 300; color: var(--k-text, #fff); }
+  :root { --k-head: #46435a; --k-strip: #f1f2f5; --k-name: #15161b; --k-cells: #1d1e24; --k-score: #35b3ea; --k-marker: #d6249f;
+          --k-foot: #26262e; --k-chip: #0a0b0e; --k-text: #ffffff; --k-thrower: #35b3ea; --k-stats: #16161c; --k-label: #6fc3ff;
+          --k-moment: #d6249f; --k-nine: #d6249f; --k-ninecard: #3a3b44; }
+  html.look-sky #sky { display: block; }
+  html.look-sky #arena { display: none !important; }
+  #sky.hidden { opacity: 0; }
+  .k-panel { position: relative; margin-left: 296px; width: 694px; border-radius: 12px; overflow: hidden;
+             box-shadow: 0 10px 28px rgba(0,0,0,.55); background: var(--k-cells); }
+  /* sizes and positions measured against the TV board (each as a share of the 66px name row): header and footer bars,
+     text sizes, the flag, and the columns (the dark leg column is wider than the sets one, which puts the flag and the
+     count where the TV board has them) */
+  .k-head, .k-row { display: grid; grid-template-columns: 1fr 92px 84px 96px 126px; align-items: center; }
+  #sky.nosets .k-head, #sky.nosets .k-row { grid-template-columns: 1fr 92px 0 96px 126px; }
+  #sky.nosets .k-sets { visibility: hidden; }
+  .k-head { height: 58px; background: linear-gradient(90deg, color-mix(in srgb, var(--k-head) 85%, #fff 8%), var(--k-head));
+            font-family: 'Sky Thin', 'Sky Light', 'Overlay Thin', sans-serif; font-size: 32px; color: var(--k-text); }
+  .k-head .k-format { padding-left: 27px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .k-head span { text-align: center; }
+  .k-row { height: 66px; }
+  .k-row + .k-row .k-name, .k-row + .k-row .k-flag { border-top: 2px solid #c9ccd3; }
+  .k-name, .k-flag { height: 100%; box-sizing: border-box; display: flex; align-items: center; background: var(--k-strip); color: var(--k-name); }
+  .k-row + .k-row .k-name, .k-row + .k-row .k-flag { border-top-color: color-mix(in srgb, var(--k-strip) 78%, #000); }
+  .k-name { position: relative; padding-left: 26px; padding-right: 10px; font-family: 'Sky Bold', 'Overlay Bold', 'Montserrat', sans-serif;
+            --name-size: 42px; font-size: var(--name-size); font-weight: 700; white-space: nowrap; overflow: hidden; }
+  .k-name span { overflow: hidden; text-overflow: ellipsis; }
+  /* who threw first this leg: a triangle at the strip's left edge */
+  .k-row.starter .k-name::before { content: ''; position: absolute; left: 4px; top: 50%; margin-top: -11px;
+                                   border-left: 15px solid var(--k-marker); border-top: 11px solid transparent; border-bottom: 11px solid transparent; }
+  .k-flag { justify-content: center; }
+  .k-flag img { width: 53px; height: 36px; object-fit: cover; display: block; box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
+  .k-flag.none img { visibility: hidden; }
+  .k-row b { height: 100%; display: flex; align-items: center; justify-content: center; font-size: 42px; font-weight: 300;
+             font-variant-numeric: tabular-nums; border-left: 1px solid rgba(255,255,255,.08); }
+  .k-row b.k-score { font-family: 'Sky Bold', 'Overlay Bold', 'Montserrat', sans-serif; font-weight: 700; font-size: 44px;
+                     color: var(--k-score); position: relative; }
+  /* who's throwing: a bar outside the board's right edge, the full height of their row (TV board: about a fifth of the row
+     height wide; 10px here, which fills the space between the board and the edge of the overlay) */
+  .k-thrower { position: absolute; left: 990px; width: 10px; background: var(--k-thrower); border-radius: 0 3px 3px 0;
+               opacity: 0; transition: opacity .2s, top .25s ease; pointer-events: none; }
+  .k-thrower.on { opacity: 1; }
+  #sky.ninecard .k-thrower { opacity: 0; }
+  .k-foot { height: 58px; display: flex; align-items: center; padding: 0 27px; background: var(--k-foot);
+            font-size: 33px; color: var(--k-text); white-space: nowrap; overflow: hidden; }
+  .k-foot:empty, #sky.nocaption .k-foot { display: none; }
+  /* checkout routes to the left of each row: the thrower's bright, the other player's dimmed */
+  /* the checkout box and "9" box are the full height of the name row and sit right against the board, tucked 4px under
+     its edge (the panel is drawn on top), and against each other, as on the TV board */
+  .k-route { position: absolute; left: 0; width: 300px; height: 66px; display: flex; justify-content: flex-end; align-items: stretch; gap: 0; }
+  /* the second row's boxes start below the board's dividing line, like its name strip, so the two rows of boxes have the
+     same small gap between them as the rows */
+  #k-route-1 { margin-top: 2px; height: 64px; }
+  /* one continuous box per row, darts spaced out inside it */
+  /* as each dart hits its target, that target's text vanishes and its slot closes up (about 0.45 s), so the box shrinks
+     towards the board and the "9" box beside it follows, as on the TV board (overlay.js setRoute) */
+  /* each dart has a fixed-width slot, so two players' routes of the same length are the same size with their darts in
+     line, as on the TV board; the box is square and sits flush against the name strip */
+  .k-route div { height: 100%; padding: 0 18px 0 6px; box-sizing: border-box; display: flex; align-items: center; gap: 0;
+                 background: color-mix(in srgb, var(--k-chip) 75%, transparent); border-radius: 0; font-size: 30px;
+                 color: color-mix(in srgb, var(--k-text) 40%, transparent); white-space: nowrap; }
+  .k-route.current div { color: var(--k-text); }
+  .k-route div:empty { display: none; }
+  .k-chips span { display: inline-block; overflow: hidden; white-space: nowrap; width: 66px; text-align: center;
+                  transition: max-width .45s cubic-bezier(.2,.8,.3,1) .05s, margin .45s cubic-bezier(.2,.8,.3,1) .05s, opacity .06s; }
+  .k-chips span.gone { max-width: 0 !important; opacity: 0; }
+  .k-chips.closing { padding: 0; opacity: 0; transition: padding .45s cubic-bezier(.2,.8,.3,1) .05s, opacity .3s ease .2s; }
+
+  /* ---------- big moments (Options: Show 180 and nine-darter effects) ----------
+     PDC: a 180 fills the dial with the highlight colours and "180" (a finished nine-darter: "9"); the "9" tile and the
+     glow inside the dial while a nine-darter is on are in the arena block above. Sky: a pink splotch (--k-moment) with "180" over the remaining score, and a "9"
+     box (--k-nine) left of the row. overlay.js keeps .moment-on for the flash time, then the fade time takes over. */
+  .a-moment { position: absolute; inset: 13px; z-index: 3; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+              background: radial-gradient(circle at 50% 35%, var(--a-accent2, var(--a-accent)), var(--a-accent) 78%);
+              box-shadow: 0 0 28px color-mix(in srgb, var(--a-accent) 70%, transparent), inset 0 -8px 18px rgba(0,0,0,.25);
+              font-family: 'Overlay Bold', 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 64px; color: #fff;
+              opacity: 0; transform: scale(1); pointer-events: none; transition: opacity var(--moment-fade, .3s) ease; }
+  .a-dial.moment-on .a-moment { opacity: 1; animation: moment-pop .28s cubic-bezier(.2,.9,.3,1.3); transition: opacity .1s; }
+  .a-moment span { display: inline-block; transform: skewX(-8deg); }
+  @keyframes moment-pop { from { transform: scale(.55); } }
+
+  .k-row { position: relative; }
+  /* the splotch is one plain oval of the flash colour, drawn as the box's own background (a separate layer left a
+     thin coloured line along the bottom edge). Only the oval shows: the score under it is hidden while the flash is up,
+     so the pop-in can't push a dark box past the score cell; as the flash fades the new score shows through it */
+  .k-moment { position: absolute; right: 0; top: 0; bottom: 0; width: 126px; display: flex; align-items: center; justify-content: center;
+              background: radial-gradient(ellipse 47% 39% at 50% 50%, var(--k-moment) 96%, transparent 100%);
+              font-family: 'Sky Bold', 'Overlay Bold', 'Montserrat', sans-serif; font-weight: 700; font-size: 46px; color: #fff;
+              text-shadow: 0 2px 6px rgba(0,0,0,.3); pointer-events: none; opacity: 0; transition: opacity var(--moment-fade, .3s) ease; }
+  .k-row.moment-on .k-moment { opacity: 1; transition: opacity .1s; animation: moment-pop .28s cubic-bezier(.2,.9,.3,1.3); }
+  .k-row.moment-on b.k-score { color: transparent; }
+  /* the "9" box: the full height of the name row, rounded on its left side only, meeting the checkout box (or the
+     board) edge to edge, as on the TV board */
+  .k-nine { width: 0; height: 100%; border-radius: 6px 0 0 6px; display: flex; align-items: center; justify-content: center; overflow: hidden;
+            box-sizing: border-box; margin-right: 0;
+            background: var(--k-nine); color: #fff; font-family: 'Sky Bold', 'Overlay Bold', sans-serif; font-weight: 700; font-size: 34px;
+            opacity: 0; transition: width .3s ease, margin .3s ease, opacity .3s; }
+  /* measured from the TV board: about 1.16 times as wide as it is tall, with small rounded corners on the left only */
+  .k-route.nine .k-nine { width: 76px; opacity: 1; }
+  /* a finished nine-darter: the whole board turns one plain colour (Sky colours: Nine-darter card, grey by default) and
+     the player's name and "9-DARTER" come in, as on the TV board. The colour wipes in from the left (about 0.35 s), the
+     text follows, it holds about 9 s, then the board wipes back in from the left (about 0.25 s) */
+  /* sits over the panel rather than inside it, 1px bigger all round with its own rounded corners, so the panel's soft
+     edge is fully covered and no line of the board shows round it as it slides in */
+  .k-nine-card { position: absolute; top: -1px; bottom: -1px; left: 295px; width: 696px; border-radius: 13px; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center;
+                 background: var(--k-ninecard); clip-path: inset(0 100% 0 0); transition: none; pointer-events: none;
+                 color: var(--k-text); line-height: 1; }
+  .k-nine-card small { font: 300 30px 'Sky Thin', 'Sky Light', 'Overlay Thin', sans-serif; opacity: .85; margin-bottom: 8px; }
+  .k-nine-card b { font: 700 86px 'Sky Bold', 'Overlay Bold', sans-serif; letter-spacing: .01em; }
+  .k-nine-card small, .k-nine-card b { opacity: 0; }
+  /* the text slides in, starting about 12% smaller, and keeps growing slowly to full size over about 2 s (TV board) */
+  .k-nine-card small, .k-nine-card b { transform: translateX(-28px) scale(.88); }
+  .k-nine-card.show small, .k-nine-card.show b { opacity: 1; transform: none;
+                                                transition: opacity .3s ease .25s, transform 2.2s cubic-bezier(.15,.75,.3,1) .25s; }
+  .k-nine-card.show small { opacity: .85; }
+  .k-nine-card.show b { transition-delay: .32s; }
+  .k-nine-card.show { clip-path: inset(0 0 0 0); transition: clip-path .35s cubic-bezier(.4,0,.2,1); }
+  .k-nine-card.show.leave { clip-path: inset(0 0 0 100%); transition: clip-path .25s cubic-bezier(.4,0,.2,1); }
+  #sky.ninecard .k-route { opacity: 0; transition: opacity .2s; }
+  #sky.ninefull .k-panel { background: var(--k-ninecard); }
+  #sky.ninefull .k-panel > * { visibility: hidden; transition: visibility 0s .36s; }
+
+  /* ---------- Sky look: "Match Stats" card instead of the PDC summary ---------- */
+  .ks-card { display: none; }
+  html.look-sky #summary > :not(.ks-card) { display: none; }
+  html.look-sky .ks-card { display: block; }
+  .ks-card { background: color-mix(in srgb, var(--k-stats) 92%, transparent); border-radius: 12px; padding: 20px 30px 24px;
+             box-shadow: 0 10px 30px rgba(0,0,0,.55); color: var(--k-text);
+             font-family: 'Sky Light', 'Overlay Thin', 'Roboto Condensed', sans-serif; font-weight: 300; }
+  .ks-title { text-align: center; font-family: 'Sky Bold', 'Overlay Bold', sans-serif; font-weight: 700; font-size: 36px; }
+  .ks-sub { text-align: center; font-family: 'Sky Thin', 'Sky Light', 'Overlay Thin', sans-serif; font-size: 22px; opacity: .75; margin-top: 2px; min-height: 4px; }
+  /* names and every stat row share the same three columns, so each name sits centred over its numbers */
+  .ks-names { display: grid; grid-template-columns: 1fr 220px 1fr; align-items: center; margin: 14px 0 10px;
+              font-family: 'Sky Bold', 'Overlay Bold', sans-serif; font-weight: 700; font-size: 38px; text-align: center; }
+  .ks-names span { display: block; min-width: 0; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ks-names b { font-size: 40px; color: var(--k-score); }
+  .ks-row { display: grid; grid-template-columns: 1fr 220px 1fr; align-items: center; height: 46px; text-align: center;
+            border-top: 1px solid color-mix(in srgb, var(--k-text) 16%, transparent); font-size: 28px; }
+  .ks-row span { color: var(--k-label); font-family: 'Sky Thin', 'Sky Light', 'Overlay Thin', sans-serif; font-size: 24px; }
+
+  /* ---------- post-game summary (same look as the arena board) ---------- */
+  #summary { position: absolute; left: 50%; bottom: 40px; width: 720px; transform: translate(-50%, 0); transition: opacity .5s, transform .5s;
+             --a-accent: #1f6fe5; --a-panel: #1c1f26; --a-tab: #2a2e37; filter: drop-shadow(0 10px 30px rgba(0,0,0,.5)); }
+  #summary.hidden { opacity: 0; transform: translate(-50%, 24px); }
+  .s-title { position: absolute; left: 0; right: 0; top: -40px; text-align: center; font-family: 'Overlay Thin', 'Roboto Condensed', sans-serif;
+             font-weight: 300; font-size: 24px; letter-spacing: .14em; color: #e8e9ec; text-shadow: 0 2px 8px rgba(0,0,0,.7); }
+  #summary .a-tab { width: 50%; }
+  .s-body { background: var(--a-panel-bottom, var(--a-panel)); border-radius: 0 0 24px 24px; padding: 8px 0 14px; }
+  .s-row { display: grid; grid-template-columns: 1fr 240px 1fr; align-items: center; height: 36px; }
+  .s-row + .s-row { border-top: 1px solid rgba(255,255,255,.05); }
+  .s-row b { font-family: 'Overlay Bold', 'Barlow Condensed', sans-serif; font-size: 30px; font-weight: 800; text-align: center; color: rgba(255,255,255,.5);
+             font-variant-numeric: tabular-nums; }
+  .s-row b.best { color: #fff; }
+  .s-row span { font-family: 'Overlay Thin', 'Roboto Condensed', sans-serif; font-size: 20px; font-weight: 300; letter-spacing: .08em;
+                text-transform: uppercase; color: #c9ccd3; text-align: center; }
+
+  #status { position: absolute; right: 12px; top: 8px; font: 14px system-ui; color: #fff; background: rgba(0,0,0,.6);
+            padding: 4px 8px; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <div id="board" class="hidden">
+    <div class="head"><span id="title">501</span><div class="cols"><span id="setsHead">Sets</span><span>Legs</span><span class="remhead"></span></div></div>
+    <div class="table" id="players"></div>
+    <div class="foot">
+      <div class="chip" id="visitChip"><small>Visit</small><span class="dart" id="d0"></span><span class="dart" id="d1"></span><span class="dart" id="d2"></span><span id="visitSum"></span></div>
+      <div class="chip checkout hide" id="checkoutChip"><small>Out</small><span id="checkout"></span></div>
+    </div>
+  </div>
+  <div id="arena" class="hidden">
+    <div class="a-flags off" id="a-flags"><div class="a-flag" id="a-flag-0"><img alt=""></div><div class="a-flag" id="a-flag-1"><img alt=""></div></div>
+    <div class="a-board">
+      <!-- back layer: name band (with the nine-darter tiles, smoothed together) and caption bar. Gradient stops are
+           set by overlay.js from the colour settings -->
+      <svg class="a-back" viewBox="0 0 680 340">
+        <defs>
+          <linearGradient id="a-band" gradientUnits="userSpaceOnUse" x1="0" y1="16" x2="0" y2="136"><stop offset="0"/><stop offset="1"/></linearGradient>
+          <linearGradient id="a-panel" gradientUnits="userSpaceOnUse" x1="0" y1="84" x2="0" y2="296"><stop offset="0"/><stop offset="1"/></linearGradient>
+          <linearGradient id="a-bar" gradientUnits="userSpaceOnUse" x1="0" y1="230" x2="0" y2="336"><stop offset="0"/><stop offset="1"/></linearGradient>
+          <radialGradient id="a-face" cx="50%" cy="30%" r="75%"><stop offset="0"/><stop offset="1"/></radialGradient>
+          <filter id="a-join" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="4"/><feColorMatrix values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -8"/></filter>
+        </defs>
+        <g class="a-band" filter="url(#a-join)" fill="url(#a-band)">
+          <rect x="52" y="16" width="576" height="120" rx="20"/>
+          <rect class="a-tile left" id="a-tile-0" x="-5" y="31" width="77" height="58" rx="12"/>
+          <rect class="a-tile right" id="a-tile-1" x="608" y="31" width="77" height="58" rx="12"/>
+        </g>
+        <rect class="a-bar" x="84" y="230" width="512" height="106" rx="20" fill="url(#a-bar)"/>
+      </svg>
+      <div class="a-caption" id="a-caption-box"><span id="a-caption"></span></div>
+      <div class="a-nine-clip left"><div class="a-nine left" id="a-nine-0">9</div></div><div class="a-nine-clip right"><div class="a-nine right" id="a-nine-1">9</div></div>
+      <div class="a-tabs"><div class="a-tab" id="a-name-0"></div><div class="a-tab" id="a-name-1"></div></div>
+      <!-- front layer: both dial rims and the middle; the curves leave each rim along the circle so the joins are smooth -->
+      <svg class="a-front" viewBox="0 0 680 340"><path class="a-panel" fill="url(#a-panel)" d="M162 92 C199 107 300 106 340 106 C380 106 481 107 518 92 A106 106 0 1 1 518 288 C481 273 380 270 340 270 C300 270 199 273 162 288 A106 106 0 1 1 162 92 Z"/></svg>
+      <div class="a-dial left" id="a-dial-left">
+        <svg viewBox="0 0 212 212"><defs><linearGradient id="ring-left" x1="0" y1="0" x2="1" y2="0"><stop offset="0" style="stop-color: var(--a-accent)"/><stop offset="1" style="stop-color: var(--a-accent2, var(--a-accent))"/></linearGradient></defs>
+          <circle class="bevel" cx="106" cy="106" r="104"/><circle class="gap" cx="106" cy="106" r="95.25"/>
+          <circle class="track" cx="106" cy="106" r="86.5"/><circle class="arc" cx="106" cy="106" r="86.5" stroke="url(#ring-left)"/>
+          <circle class="face" cx="106" cy="106" r="77.75" fill="url(#a-face)"/></svg>
+        <div class="a-score"></div>
+        <svg class="a-dart" viewBox="0 0 40 40"><g stroke="currentColor" stroke-linecap="round" fill="none"><line x1="5" y1="35" x2="12" y2="28" stroke-width="1.4"/><line x1="12" y1="28" x2="20" y2="20" stroke-width="4"/><line x1="20" y1="20" x2="27" y2="13" stroke-width="1.6"/></g><g fill="currentColor"><path d="M25.5 14.5 L27.5 5 L34 3.5 Z"/><path d="M25.5 14.5 L35 12.5 L36.5 6 Z"/></g></svg>
+        <div class="a-moment moment"></div>
+      </div>
+      <div class="a-dial right" id="a-dial-right">
+        <svg viewBox="0 0 212 212"><defs><linearGradient id="ring-right" x1="0" y1="0" x2="1" y2="0"><stop offset="0" style="stop-color: var(--a-accent)"/><stop offset="1" style="stop-color: var(--a-accent2, var(--a-accent))"/></linearGradient></defs>
+          <circle class="bevel" cx="106" cy="106" r="104"/><circle class="gap" cx="106" cy="106" r="95.25"/>
+          <circle class="track" cx="106" cy="106" r="86.5"/><circle class="arc" cx="106" cy="106" r="86.5" stroke="url(#ring-right)"/>
+          <circle class="face" cx="106" cy="106" r="77.75" fill="url(#a-face)"/></svg>
+        <div class="a-score"></div>
+        <svg class="a-dart" viewBox="0 0 40 40"><g stroke="currentColor" stroke-linecap="round" fill="none"><line x1="5" y1="35" x2="12" y2="28" stroke-width="1.4"/><line x1="12" y1="28" x2="20" y2="20" stroke-width="4"/><line x1="20" y1="20" x2="27" y2="13" stroke-width="1.6"/></g><g fill="currentColor"><path d="M25.5 14.5 L27.5 5 L34 3.5 Z"/><path d="M25.5 14.5 L35 12.5 L36.5 6 Z"/></g></svg>
+        <div class="a-moment moment"></div>
+      </div>
+      <div class="a-mid">
+        <div class="a-format" id="a-format"></div>
+        <div class="a-row sets hide" id="a-sets"><b id="a-s0"></b><span>SETS</span><b id="a-s1"></b></div>
+        <div class="a-row"><b id="a-l0"></b><span>LEGS</span><b id="a-l1"></b></div>
+      </div>
+      <div class="a-route left" id="a-route-0"><div></div><div></div><div></div></div>
+      <div class="a-route right" id="a-route-1"><div></div><div></div><div></div></div>
+    </div>
+  </div>
+  <div id="sky" class="hidden">
+    <div class="k-thrower" id="k-thrower"></div>
+    <div class="k-route" id="k-route-0"><b class="k-nine">9</b><div class="k-chips"></div></div>
+    <div class="k-route" id="k-route-1"><b class="k-nine">9</b><div class="k-chips"></div></div>
+    <div class="k-panel">
+      <div class="k-head"><div class="k-format" id="k-format"></div><span></span><span class="k-sets">Sets</span><span>Legs</span><span></span></div>
+      <div class="k-row" id="k-row-0"><div class="k-name"><span></span></div><div class="k-flag"><img alt=""></div><b class="k-sets"></b><b class="k-legs"></b><b class="k-score"></b><div class="k-moment moment"></div></div>
+      <div class="k-row" id="k-row-1"><div class="k-name"><span></span></div><div class="k-flag"><img alt=""></div><b class="k-sets"></b><b class="k-legs"></b><b class="k-score"></b><div class="k-moment moment"></div></div>
+      <div class="k-foot" id="k-foot"></div>
+    </div>
+    <div class="k-nine-card" id="k-nine-card"><small id="k-nine-name"></small><b>9-DARTER</b></div>
+  </div>
+  <div id="summary" class="hidden">
+    <div class="s-title">MATCH SUMMARY</div>
+    <div class="a-tabs"><div class="a-tab" id="s-name-0"></div><div class="a-tab" id="s-name-1"></div></div>
+    <div class="s-body" id="s-rows"></div>
+    <div class="ks-card"><div class="ks-title">Match Stats</div><div class="ks-sub" id="ks-sub"></div>
+      <div class="ks-names"><span id="ks-name-0"></span><b id="ks-score"></b><span id="ks-name-1"></span></div>
+      <div id="ks-rows"></div></div>
+  </div>
+  <div id="status" class="hide"></div>
+
+  <!-- OBS caches local files: load the scripts with a timestamp so an edited config.js or overlay.js is always
+       picked up (otherwise a Local file source can keep running an old copy until "Refresh cache of current page") -->
+  <script>
+    for (const f of ['config.js', 'checkouts.js', 'obs.js', 'overlay.js']) document.write(`<script src="${f}?v=${Date.now()}"><\/script>`);
+  </script>
+</body>
+</html>
