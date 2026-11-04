@@ -34,8 +34,8 @@
 <body>
 <main>
   <h1>Darts scoreboard overlay</h1>
-  <p class="lede">A live demo of a home-made OBS scoreboard for Scolia dartboards. Player one throws a nine-darter in
-    the first leg; pick names, flags and colours, then press Play.</p>
+  <p class="lede">A live demo of a home-made OBS scoreboard for Scolia dartboards. Player one throws a nine-darter in a
+    one-leg match; pick names, flags and colours, then press Play.</p>
 
   <form id="opts">
     <label>Player one (throws the nine)<input id="p1" value="Matthews" maxlength="24"></label>
@@ -83,12 +83,12 @@
   for (const k of FIELDS) if (qs.has(k)) $(k).value = qs.get(k);
 
   function src(look) {
-    const p = new URLSearchParams({ look, view: 'scoreboard', speed: $('speed').value, preset: $('preset').value,
+    const p = new URLSearchParams({ look, view: 'scoreboard', legs: '1', speed: $('speed').value, preset: $('preset').value,
       names: [$('p1').value, $('p2').value].map((n, j) => n.replace(/,/g, ' ').trim() || ['Player one', 'Player two'][j]).join(','),
       caption: $('caption').value.trim() });
     // flags only show when both players have one
     if ($('f1').value && $('f2').value) p.set('flags', $('f1').value + ',' + $('f2').value);
-    return 'overlay/overlay.html?demo&perfect&' + p.toString();
+    return 'overlay/overlay.html?demo&perfect&once&' + p.toString();
   }
   function play() {
     const look = $('look').value;

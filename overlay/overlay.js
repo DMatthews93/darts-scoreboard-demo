@@ -681,6 +681,7 @@
   // aiming at the checkout route on a finish, then shows the post-game summary and starts again.
   // &start=112,25 starts the players on those scores (handy for styling checkouts).
   // &perfect makes the first player hit every dart they aim at (a nine-darter whenever they start the leg).
+  // &once stops the demo when the match ends, leaving the final board up.
   function runDemo() {
     const withSets = qs.has('sets');
     const legsTo = Number(qs.get('legs')) || (withSets ? 2 : 3);
@@ -741,6 +742,8 @@
           n60: s.n60, n80: s.n80, n100: s.n100, n140: s.n140, n180: s.n180 };
       });
       setTimeout(() => { st.summary = summary; show(); }, 4000);
+      // &once: the finished match stays up and the demo stops there (the public demo page replays it)
+      if (qs.has('once')) { pause = Infinity; return; }
       pause = Math.ceil(((cfg.summarySeconds ?? 20) * 1000 + 7000) / speed);
       restart = true;
     }
@@ -793,10 +796,10 @@
         endVisit(i, st.currentVisit, false);
         p.legs++; s.legsWon++;
         if (withSets && p.legs >= legsTo) { p.sets++; s.setsWon++; st.players.forEach((x) => (x.legs = 0)); }
+        p.remaining = 0;
         if (legDarts[i] === 9) { show(); onEvent({ type: 'nineDarter', playerId: p.id }, st); }
         if ((withSets ? p.sets >= setsTo : p.legs >= legsTo)) return finishMatch();
         // the finished leg stays up for a moment before the next one starts, as in Scolia
-        p.remaining = 0;
         nextLeg = true;
         pause = 3;
         return show();

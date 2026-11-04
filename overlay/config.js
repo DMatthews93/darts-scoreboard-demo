@@ -21,5 +21,5 @@ window.OVERLAY_CONFIG = {
   showCheckout: true,
   showAverage: true,
   showFlags: true,           // country flags above the name tabs, from the players' Scolia profiles
-  summarySeconds: 20,        // how long the post-game stats screen stays up (0 = don't show it)
+  summarySeconds: 0,        // how long the post-game stats screen stays up (0 = don't show it)
 };
